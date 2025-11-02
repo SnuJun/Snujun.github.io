@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="/assets/img/profile.jpg" class="profile-pic" alt="Profile photo">
+  <div class="profile-name">Junwoo Lee</div>
+</p>
 ---
 layout: default
 title: Home

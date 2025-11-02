@@ -1,6 +1,8 @@
+
 # --- 기본 ---
-title: "SnuJun’s Blog"
-description: "Statistics, ML, and life at SNU"
+title: "Jun's Blog"
+description: "Master’s student in Statistics at Seoul Nat'l Univ"
+logo: /assets/img/profile.jpg
 url: "https://snujun.github.io"
 remote_theme: pages-themes/minimal@v0.2.0
 

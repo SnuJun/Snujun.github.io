@@ -7,11 +7,13 @@ where I study **high-dimensional statistics** and related topics in modern infer
 ---
 ### Education
 
-- **Seoul National University**, College of Natural Sciences — *M.S. in Statistics*  
+- **Seoul National University**, College of Natural Sciences
+  — *M.S. in Statistics*  
   *Mar 2024 – Present*  
   Focus: High-dimensional statistical inference and covariance estimation
 
-- **Konkuk University**, College of Social Sciences — *B.A. in Applied Statistics*  
+- **Konkuk University**, College of Social Sciences
+  — *B.A. in Applied Statistics*  
   *Mar 2017 – Feb 2024*  
 
 

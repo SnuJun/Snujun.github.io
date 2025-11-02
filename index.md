@@ -6,13 +6,16 @@ where I study **high-dimensional statistics** and related topics in modern infer
 
 ---
 
-### Academic Background
-- **Undergraduate**  
-  - Regression Project  
-  - *Economic Data Analysis*  
-  - Machine Learning Club (*Kuggle*)
-- **Graduate**  
-  - High-dimensional Statistical Inference
+### Projects & Activities
+
+#### Undergraduate
+- [Regression Project](https://github.com/SnuJun/Regression-Project)  
+- [Economic Data Analysis](https://github.com/SnuJun/Economic-Data-Analysis)  
+- [Machine Learning Club *Kuggle*](https://github.com/SnuJun/Kuggle)
+
+#### Graduate
+- [High-dimensional Statistical Inference](https://github.com/SnuJun/HighDim-Study)
+
 
 ---
 

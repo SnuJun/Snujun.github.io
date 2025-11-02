@@ -5,7 +5,20 @@ I am currently pursuing a Master’s degree in Statistics at Seoul National Univ
 where I study **high-dimensional statistics** and related topics in modern inference.
 
 ---
+### Education
 
+- **Seoul National University**, College of Natural Sciences — *M.S. in Statistics*  
+  *Mar 2024 – Present*  
+  Focus: High-dimensional statistical inference and covariance estimation
+
+- **Konkuk University**, College of Social Sciences — *B.A. in Applied Statistics*  
+  *Mar 2017 – Feb 2024*  
+
+
+- **Republic of Korea Army** — *Military Service*  
+  *Mar 2019 – Mar 2021*  
+
+---
 ### Projects & Activities
 
 #### Undergraduate

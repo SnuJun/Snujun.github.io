@@ -26,7 +26,8 @@ where I study **high-dimensional statistics** and related topics in modern infer
 #### Undergraduate
 - [Regression Project](https://github.com/SnuJun/Regression-Project)  
 - [Economic Data Analysis](https://github.com/SnuJun/Economic-Data-Analysis)  
-- [Machine Learning Club *Kuggle*](/kuggle/)
+- [Machine Learning Club *Kuggle*]- <a href="{{ '/kuggle/' | relative_url }}">Machine Learning Club <em>Kuggle</em></a>
+
 
 
 #### Graduate

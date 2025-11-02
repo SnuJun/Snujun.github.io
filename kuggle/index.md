@@ -1,20 +1,16 @@
 ---
-layout: default
-title: Machine Learning Club Kuggle
-permalink: /kuggle/
+layout: page
+title: Machine Learning Club — Kuggle
 ---
 
-# Kuggle Sessions (Weeks 1–9)
+# Kuggle: Weekly Slides
 
-<p>Click a week to open the PDF.</p>
-
-<ul>
-{% assign files = site.static_files | where_exp: "f", "f.path contains '/docs/'" %}
-{% assign kuggle = files | where_exp: "f", "f.name contains 'Kuggle_wk' and f.extname == '.pdf'" %}
-{% assign sorted = kuggle | sort: "name" %}
-{% for f in sorted %}
-  <li><a href="{{ f.path | relative_url }}" target="_blank" rel="noopener">
-    {{ f.name | replace: 'Kuggle_', '' | replace: '_ppt', '' | replace: '.pdf','' | replace: '_', ' ' | capitalize }}
-  </a></li>
-{% endfor %}
-</ul>
+- [Kuggle_wk1_ppt](/docs/Kuggle_wk1_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk2_ppt](/docs/Kuggle_wk2_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk3_ppt](/docs/Kuggle_wk3_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk4_ppt](/docs/Kuggle_wk4_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk5_ppt](/docs/Kuggle_wk5_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk6_ppt](/docs/Kuggle_wk6_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk7_ppt](/docs/Kuggle_wk7_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk8_ppt](/docs/Kuggle_wk8_ppt.pdf){:target="_blank" rel="noopener"}
+- [Kuggle_wk9_ppt](/docs/Kuggle_wk9_ppt.pdf){:target="_blank" rel="noopener"}

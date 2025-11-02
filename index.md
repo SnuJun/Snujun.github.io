@@ -1,10 +1,12 @@
-<p align="center">
-  <img src="/assets/img/profile.jpg" class="profile-pic" alt="Profile photo">
-  <div class="profile-name">Junwoo Lee</div>
-</p>
----
-layout: default
-title: Home
+<div style="display:flex; align-items:center; gap:20px;">
+  <img src="/assets/img/profile.jpg" style="width:120px; height:120px; border-radius:50%; object-fit:cover; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+  <div>
+    <h1 style="margin-bottom:5px;">SnuJun’s Blog</h1>
+    <p style="margin:0;">Statistics, ML, and life at SNU</p>
+    <p style="margin-top:8px; font-weight:600;">Junwoo Lee</p>
+  </div>
+</div>
+
 ---
 
 # 👋 Welcome!

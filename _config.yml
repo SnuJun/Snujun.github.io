@@ -1,3 +1,36 @@
+# --- 기본 ---
+title: "SnuJun’s Blog"
+description: "Statistics, ML, and life at SNU"
+url: "https://snujun.github.io"
 remote_theme: pages-themes/minimal@v0.2.0
+
+# --- 네비게이션(상단 링크) ---
+# Minimal 테마는 기본 네비가 없어서 index/about로 유도
+# 필요시 index.md/about.md에 링크 배치
+
+# --- 플러그인 ---
 plugins:
   - jekyll-remote-theme
+  - jekyll-feed       # RSS 피드
+  - jekyll-paginate   # 페이지네이션(옵션)
+
+paginate: 5           # 페이지당 글 수 (옵션)
+paginate_path: "/page:num/"
+
+# --- 포스트 기본 ---
+markdown: kramdown
+kramdown:
+  input: GFM
+  math_engine: mathjax
+
+# --- 사이트 메타 ---
+author: "Junwoo Lee"
+email: "cokemakoo@snu.ac.kr"
+
+# --- 소셜/배지(필요시) ---
+github_username: "SnuJun"
+# twitter_username: ""
+# google_analytics: "G-XXXXXXX"   # GA4 트래킹 ID 있으면 입력
+
+# --- 빌드 ---
+exclude: ["README.md"]

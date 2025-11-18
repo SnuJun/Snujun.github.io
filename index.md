@@ -34,7 +34,7 @@ where I study **high-dimensional statistics** and related topics in modern infer
 
 
 #### Graduate
-- [High-dimensional Statistical Inference]
+- [Linear Shrinkage for Positive Definite Covariance Matrix Estimation](/assets/LPD/getLPD.R){:target="_blank" rel="noopener"}
 - [Deep Learning Project: Methods for Interpreting Deep Learning Models](/assets/pdf/Methods%20for%20Interpreting%20DL%20models.pdf){:target="_blank" rel="noopener"}
 
 

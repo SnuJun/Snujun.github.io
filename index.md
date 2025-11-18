@@ -25,8 +25,9 @@ where I study **high-dimensional statistics** and related topics in modern infer
 
 #### Undergraduate
 - [Machine Learning Club *Kuggle*](/kuggle/){:target="_blank" rel="noopener"}
-- [Economic Data Analysis](/assets/pdf/economic_data_final_presentation.pdf){:target="_blank" rel="noopener"}  
+- [Economc Data Analysis](/assets/pdf/economic_data_final_presentation.pdf){:target="_blank" rel="noopener"}
 - [Regression Project](/assets/pdf/regression_project_final_report.pdf){:target="_blank" rel="noopener"}
+
 
 
 

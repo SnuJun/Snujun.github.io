@@ -24,14 +24,16 @@ where I study **high-dimensional statistics** and related topics in modern infer
 ### Projects & Activities
 
 #### Undergraduate
-- [Regression Project](https://github.com/SnuJun/Regression-Project)  
-- [Economic Data Analysis](https://github.com/SnuJun/Economic-Data-Analysis)  
 - [Machine Learning Club *Kuggle*](/kuggle/){:target="_blank" rel="noopener"}
+- [Economic Data Analysis](/assets/pdf/economic_data_final_presentation.pdf){:target="_blank" rel="noopener"}  
+- [Regression Project](/assets/pdf/regression_project_final_report.pdf){:target="_blank" rel="noopener"}
+
+
 
 
 
 #### Graduate
-- [High-dimensional Statistical Inference](https://github.com/SnuJun/HighDim-Study)
+- [High-dimensional Statistical Inference]
 - [Deep Learning Project: Methods for Interpreting Deep Learning Models](/assets/pdf/Methods%20for%20Interpreting%20DL%20models.pdf){:target="_blank" rel="noopener"}
 
 

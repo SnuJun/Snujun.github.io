@@ -32,6 +32,8 @@ where I study **high-dimensional statistics** and related topics in modern infer
 
 #### Graduate
 - [High-dimensional Statistical Inference](https://github.com/SnuJun/HighDim-Study)
+- - [Deep Learning Project: Methods for Interpreting Deep Learning Models](/assets/pdf/Methods%20for%20Interpreting%20DL%20models.pdf){:target="_blank" rel="noopener"}
+
 
 
 ---

@@ -34,7 +34,7 @@ where I study **high-dimensional statistics** and related topics in modern infer
 
 
 #### Graduate
-- [Linear Shrinkage for Positive Definite Covariance Matrix Estimation](/assets/LPD){:target="_blank" rel="noopener"}
+- [Linear Shrinkage for Positive Definite Covariance Matrix Estimation](https://github.com/SnuJun/Snujun.github.io/tree/main/assets/LPD)
 - [Deep Learning Project: Methods for Interpreting Deep Learning Models](/assets/pdf/Methods%20for%20Interpreting%20DL%20models.pdf){:target="_blank" rel="noopener"}
 
 

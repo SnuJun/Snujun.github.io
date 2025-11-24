@@ -1,0 +1,34 @@
+## Estimators##
+
+soft_thresholding_CV(data, n_type="F")
+<- 'data' : n*p data set / 'n_type' : norm type (\in \{"F","2","m","I" \})		
+-> 'mat' : Soft Threshold Matrix / 'idxmat' : Support of matrix
+
+hard_thresholding_CV(data, n_type="F")	
+<- 'data' : n*p data set / 'n_type' : norm type (\in \{ \})		
+-> 'mat' : Hard Threshold Matrix / 'idxmat' : Support of matrix
+
+ftn.cov.adap(datamat, thres.ftn= thres.hard, thresseq = NULL, thresnum = 100, diag.thres=FALSE)
+<- 'datamat' : n*p data set / 'thres.ftn' : type of threshold function(Soft, Hard) /
+    'thresseq' : sequence of threshold (if NULL, select thershold based on simulation at T.Cai (2011)) /  
+    diag.thres' : Thresholding diagonal elements
+
+-> 'estimate' : Adaptive (Hard,Soft) Threshold matrix / 'cutmat' : Support of matrix
+    
+ICF(amat, data, cc=1e-4, tol=1e-02, MAXiter=1e+3)
+<- 'amat' : Support of matrix / 'data' : n*p data set /
+    'cc' : epsilon / 'tol' : criterion for interation /
+    'MAXiter' : Max iteration
+-> 'mat' : COMET estimator / 'iter' : total iteration
+    'm_df' : matrix differences
+
+ftn.cov.Roth(datamat, thresseq, tol = 10^-7, MAXITER = 10000)
+<- 'datamat' : n*p data set / 'thresseq' : sequence of threshold / 
+    'tol' : criterion for interation /  'MAXITER' : Max iteration
+-> 'est' : Rothman method estimator / 'iter' : total iteration
+ 
+ftn.cov.Xue(datamat, thres.ftn = thres.soft, thresseq, mineigval = 1e-3, tol = 1e-4, MAXITER = 100, message = FALSE)
+<- 'datamat' : n*p data set / 'thres.ftn' : type of threshold function(Soft, Hard) /
+    'thresseq' : sequence of threshold / 'MAXITER' : Max iteration
+-> 'est' : Xue method estimator
+

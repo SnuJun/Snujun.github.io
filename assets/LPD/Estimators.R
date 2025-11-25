@@ -219,14 +219,14 @@ ftn.cov.blck <- function(X) {
   n <- nrow(X)
   p <- ncol(X)
   
-  # block size 자동 설정
+
   block.size <- p / 10
   
   if (block.size != floor(block.size)) {
     stop("p must be divisible by 10.")
   }
   
-  K <- 10  # 블록 개수
+  K <- 10 
   S <- cov(X)
   block.indices <- split(1:p, ceiling(seq_along(1:p) / block.size))
   
@@ -247,4 +247,5 @@ ftn.cov.blck <- function(X) {
 
 #(6) POET estimator ------------------------------------------------------------
 library(POET)
+
 

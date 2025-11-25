@@ -33,7 +33,8 @@ eval_ftn_1 <- function(cov.true, cov.est) {
 # evaluation : Optimal rate over elementwise max norm --------------------------
 
 eval_ftn_2 <- function(cov.true, cov.est, cov.LPD) {
-  nom <- max(abs(cov.LPD - cov.true))     # 분자: LPD 오차
-  denom <- max(abs(cov.est - cov.true))  # 분모: 기존 오차
+  nom <- max(abs(cov.LPD - cov.true))    
+  denom <- max(abs(cov.est - cov.true))  
   return(nom / denom)
 }
+

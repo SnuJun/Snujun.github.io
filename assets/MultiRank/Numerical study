@@ -1,0 +1,152 @@
+# ==============================================================================
+# Simulation Study: VAMOS vs HOMALS vs GRM
+# Focus: Effect of Category Density (C = K/n)
+# ==============================================================================
+
+# 필수 패키지 로드
+required_packages <- c("quadprog", "ltm", "nloptr", "ggplot2", "MASS", "dplyr", "tidyr")
+for (pkg in required_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# 1. 시뮬레이션 그리드 설정
+# K1 = K2 = n * C 관계를 적용하기 위해 C를 파라미터로 설정
+grid_params <- expand.grid(
+  gamma = c(0.5, 1, 3),
+  rho = c(-0.7, -0.3, 0, 0.3, 0.7),
+  n = 100,
+  C = c(0.01,0.02,0.03,0.04,0.05)  # n 대비 범주 수 비율
+)
+
+# 결과를 저장할 데이터 프레임
+results_df <- grid_params %>%
+  mutate(K = round(n * C)) %>% # K 계산
+  filter(K >= 2)               # 최소 2개 이상의 범주 보장
+
+results_df$tau_HOMALS <- NA
+results_df$tau_GRM    <- NA
+results_df$tau_VAMOS  <- NA
+
+cat(sprintf("총 %d개의 VAMOS 성능 테스트 조합을 시작합니다...\n", nrow(results_df)))
+set.seed(2026)
+
+# 2. 시뮬레이션 루프
+for (idx in 1:nrow(results_df)) {
+  
+  if (idx %% 10 == 0 || idx == 1) {
+    cat(sprintf("진행 상황: [%d / %d]\n", idx, nrow(results_df)))
+  }
+  
+  # 파라미터 추출
+  gv <- results_df$gamma[idx]
+  rv <- results_df$rho[idx]
+  nv <- results_df$n[idx]
+  kv <- results_df$K[idx] # K1 = K2 = kv
+  
+  # [0] Data Generate: Y_ij = mu_i + epsilon_ij
+  Sigma <- matrix(c(1, rv * sqrt(gv), rv * sqrt(gv), gv), 2, 2)
+  mu <- rnorm(nv, 0, 1)
+  epsilon <- mvrnorm(nv, mu = c(0, 0), Sigma = Sigma)
+  Y_cont <- cbind(mu + epsilon[, 1], mu + epsilon[, 2])
+  
+  # 균등 격자 범주화
+  cut_X <- quantile(Y_cont[, 1], probs = seq(0, 1, length.out = kv + 1))
+  cut_Y <- quantile(Y_cont[, 2], probs = seq(0, 1, length.out = kv + 1))
+  cut_X[c(1, kv+1)] <- c(-Inf, Inf); cut_Y[c(1, kv+1)] <- c(-Inf, Inf)
+  
+  raw_data <- data.frame(
+    True_mu = mu,
+    X = ordered(as.numeric(cut(Y_cont[, 1], cut_X)), levels = 1:kv),
+    Y = ordered(as.numeric(cut(Y_cont[, 2], cut_Y)), levels = 1:kv)
+  )
+  
+  freq_table <- table(raw_data$X, raw_data$Y)
+  final_counts <- as.vector(t(freq_table))
+  
+  # [1] Additive HOMALS
+  try({
+    G1 <- model.matrix(~ X - 1, data = raw_data)
+    G2 <- model.matrix(~ Y - 1, data = raw_data)
+    A <- matrix(0, kv-1, kv); for(i in 1:(kv-1)) { A[i, i] <- 1; A[i, i+1] <- -1 }
+    Dmat1 <- t(G1) %*% G1 + diag(1e-8, kv); Dmat2 <- t(G2) %*% G2 + diag(1e-8, kv)
+    y1 <- 1:kv; y2 <- 1:kv
+    for(iter in 1:50) {
+      obj <- (G1 %*% y1 + G2 %*% y2); obj <- scale(obj) * sqrt(nv)
+      y1_new <- solve.QP(Dmat1, as.vector(t(G1) %*% obj), t(-A), rep(1e-4, kv-1))$solution
+      y2_new <- solve.QP(Dmat2, as.vector(t(G2) %*% obj), t(-A), rep(1e-4, kv-1))$solution
+      if (max(abs(y1 - y1_new)) < 1e-5) break
+      y1 <- y1_new; y2 <- y2_new
+    }
+    results_df$tau_HOMALS[idx] <- cor(mu, (G1 %*% y1 + G2 %*% y2), method = "kendall")
+  }, silent = TRUE)
+  
+  # [2] GRM
+  try({
+    g_mod <- grm(data.frame(lapply(raw_data[,2:3], as.numeric)), constrained = FALSE)
+    f_res <- factor.scores(g_mod, resp.patterns = expand.grid(X=1:kv, Y=1:kv))
+    scores_grm <- matrix(NA, kv, kv)
+    for(r in 1:nrow(f_res$score.dat)) scores_grm[f_res$score.dat$X[r], f_res$score.dat$Y[r]] <- f_res$score.dat$z1[r]
+    results_df$tau_GRM[idx] <- cor(mu, scores_grm[cbind(as.numeric(raw_data$X), as.numeric(raw_data$Y))], method = "kendall")
+  }, silent = TRUE)
+  
+  # [3] VAMOS (Our Method)
+  try({
+    num_c <- 2 * kv * (kv - 1)
+    A_vamos <- matrix(0, num_c, kv^2)
+    r_idx <- 1
+    for(i in 1:kv) for(j in 1:(kv-1)) { A_vamos[r_idx, (i-1)*kv + j] <- 1; A_vamos[r_idx, (i-1)*kv + j+1] <- -1; r_idx <- r_idx + 1 }
+    for(i in 1:(kv-1)) for(j in 1:kv) { A_vamos[r_idx, (i-1)*kv + j] <- 1; A_vamos[r_idx, i*kv + j] <- -1; r_idx <- r_idx + 1 }
+    
+    fn <- function(s) { ms <- sum(final_counts * s)/nv; -(sum(final_counts * s^2)/nv - ms^2) }
+    gr <- function(s) { ms <- sum(final_counts * s)/nv; -((2/nv)*final_counts*s - 2*ms*(final_counts/nv)) }
+    
+    res_v <- nloptr(x0 = seq(0, 1, length.out = kv^2), eval_f = fn, eval_grad_f = gr,
+                    eval_g_ineq = function(s) as.vector(A_vamos %*% s + 1e-4),
+                    eval_jac_g_ineq = function(s) A_vamos,
+                    lb = rep(0, kv^2), ub = rep(1, kv^2),
+                    opts = list("algorithm" = "NLOPT_LD_SLSQP", "xtol_rel" = 1e-4, "maxeval" = 500))
+    
+    s_mat <- matrix(res_v$solution, kv, kv, byrow = TRUE)
+    results_df$tau_VAMOS[idx] <- cor(mu, s_mat[cbind(as.numeric(raw_data$X), as.numeric(raw_data$Y))], method = "kendall")
+  }, silent = TRUE)
+}
+
+# ==============================================================================
+# 4. 각 Gamma, Rho 조합별 C에 따른 성능 변화 시각화
+# ==============================================================================
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Method별 Tau 값 Long 포맷 변환
+results_long <- results_df %>%
+  pivot_longer(cols = starts_with("tau_"), 
+               names_to = "Method", 
+               names_prefix = "tau_", 
+               values_to = "Tau")
+
+# facet_grid를 활용하여 세로축은 gamma, 가로축은 rho로 격자 생성
+plot_all_cases <- ggplot(results_long, aes(x = C, y = Tau, color = Method, group = Method)) +
+  geom_line(size = 0.7) + # 최신 ggplot2 버전에 맞춰 size 사용
+  geom_point(size = 3) +
+  facet_grid(gamma ~ rho, labeller = label_both) + 
+  scale_color_brewer(palette = "Set1") +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "Performance Trend: Kendall's Tau vs Category Density (C)",
+    subtitle = "Faceted by Variance Ratio (gamma) and Correlation (rho)",
+    x = "Category Density Ratio (C = K/n)",
+    y = "Kendall's Tau-b"
+  ) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey90", color = "black"),
+    strip.text = element_text(face = "bold", size = 10)
+  )
+
+# 그래프 출력
+print(plot_all_cases)

@@ -1,10 +1,9 @@
 # ==============================================================================
-# Simulation Study: VAMOS vs HOMALS vs GRM
-# Focus: Effect of Category Density (C = K/n)
+# [Simulation Framework] VAMOS vs HOMALS vs GRM (Full Pipeline)
 # ==============================================================================
 
-# 필수 패키지 로드
-required_packages <- c("quadprog", "ltm", "nloptr", "ggplot2", "MASS", "dplyr", "tidyr")
+# 0. 필수 패키지 로드
+required_packages <- c("quadprog", "ltm", "nloptr", "MASS", "ggplot2", "dplyr", "tidyr")
 for (pkg in required_packages) {
   if (!require(pkg, character.only = TRUE)) {
     install.packages(pkg)
@@ -12,141 +11,290 @@ for (pkg in required_packages) {
   }
 }
 
-# 1. 시뮬레이션 그리드 설정
-# K1 = K2 = n * C 관계를 적용하기 위해 C를 파라미터로 설정
-grid_params <- expand.grid(
-  gamma = c(0.5, 1, 3),
-  rho = c(-0.7, -0.3, 0, 0.3, 0.7),
-  n = 100,
-  C = c(0.01,0.02,0.03,0.04,0.05)  # n 대비 범주 수 비율
-)
-
-# 결과를 저장할 데이터 프레임
-results_df <- grid_params %>%
-  mutate(K = round(n * C)) %>% # K 계산
-  filter(K >= 2)               # 최소 2개 이상의 범주 보장
-
-results_df$tau_HOMALS <- NA
-results_df$tau_GRM    <- NA
-results_df$tau_VAMOS  <- NA
-
-cat(sprintf("총 %d개의 VAMOS 성능 테스트 조합을 시작합니다...\n", nrow(results_df)))
-set.seed(2026)
-
-# 2. 시뮬레이션 루프
-for (idx in 1:nrow(results_df)) {
+# ==============================================================================
+# 1. 데이터 생성 (Data Generation)
+# ==============================================================================
+generate_data <- function(n, rho, K, gamma, het_type, fixed_mu = NULL) {
   
-  if (idx %% 10 == 0 || idx == 1) {
-    cat(sprintf("진행 상황: [%d / %d]\n", idx, nrow(results_df)))
+  if (is.null(fixed_mu)) {
+    mu <- rnorm(n, 0, 1)
+  } else {
+    mu <- fixed_mu
   }
   
-  # 파라미터 추출
-  gv <- results_df$gamma[idx]
-  rv <- results_df$rho[idx]
-  nv <- results_df$n[idx]
-  kv <- results_df$K[idx] # K1 = K2 = kv
+  Sigma_base <- matrix(c(1, rho, rho, 1), 2, 2)
+  base_eps <- mvrnorm(n, mu = c(0, 0), Sigma = Sigma_base)
   
-  # [0] Data Generate: Y_ij = mu_i + epsilon_ij
-  Sigma <- matrix(c(1, rv * sqrt(gv), rv * sqrt(gv), gv), 2, 2)
-  mu <- rnorm(nv, 0, 1)
-  epsilon <- mvrnorm(nv, mu = c(0, 0), Sigma = Sigma)
-  Y_cont <- cbind(mu + epsilon[, 1], mu + epsilon[, 2])
+  # 이분산성 2가지 조건 반영
+  sigma_X <- 0.5
+  if (het_type == "exp_mu") {
+    sigma_Y <- 0.5 * exp(mu)                   
+  } else if (het_type == "gamma_scale") {
+    sigma_Y <- sigma_X * sqrt(gamma)           
+  }
   
-  # 균등 격자 범주화
-  cut_X <- quantile(Y_cont[, 1], probs = seq(0, 1, length.out = kv + 1))
-  cut_Y <- quantile(Y_cont[, 2], probs = seq(0, 1, length.out = kv + 1))
-  cut_X[c(1, kv+1)] <- c(-Inf, Inf); cut_Y[c(1, kv+1)] <- c(-Inf, Inf)
+  epsilon_X <- sigma_X * base_eps[, 1]
+  epsilon_Y <- sigma_Y * base_eps[, 2]
+  
+  Y_cont <- cbind(mu + epsilon_X, mu + epsilon_Y)
+  
+  cut_X <- quantile(Y_cont[, 1], probs = seq(0, 1, length.out = K + 1))
+  cut_Y <- quantile(Y_cont[, 2], probs = seq(0, 1, length.out = K + 1))
+  cut_X[c(1, K + 1)] <- c(-Inf, Inf)
+  cut_Y[c(1, K + 1)] <- c(-Inf, Inf)
   
   raw_data <- data.frame(
-    True_mu = mu,
-    X = ordered(as.numeric(cut(Y_cont[, 1], cut_X)), levels = 1:kv),
-    Y = ordered(as.numeric(cut(Y_cont[, 2], cut_Y)), levels = 1:kv)
+    X = ordered(as.numeric(cut(Y_cont[, 1], cut_X)), levels = 1:K),
+    Y = ordered(as.numeric(cut(Y_cont[, 2], cut_Y)), levels = 1:K)
   )
   
-  freq_table <- table(raw_data$X, raw_data$Y)
-  final_counts <- as.vector(t(freq_table))
+  final_counts <- as.vector(t(table(raw_data$X, raw_data$Y)))
+  empty_cells_count <- sum(final_counts == 0)
   
-  # [1] Additive HOMALS
+  return(list(raw_data = raw_data, final_counts = final_counts, empty_cells = empty_cells_count, mu = mu))
+}
+
+# ==============================================================================
+# 2. 모델 적합 (Model Fitting)
+# ==============================================================================
+fit_models <- function(raw_data, final_counts, n, K, mu) {
+  
+  tau_homals <- NA; tau_grm <- NA; tau_vamos <- NA
+  scores_homals <- rep(NA, n); scores_grm <- rep(NA, n); scores_vamos <- rep(NA, n)
+  
+  # [1] HOMALS
   try({
-    G1 <- model.matrix(~ X - 1, data = raw_data)
-    G2 <- model.matrix(~ Y - 1, data = raw_data)
-    A <- matrix(0, kv-1, kv); for(i in 1:(kv-1)) { A[i, i] <- 1; A[i, i+1] <- -1 }
-    Dmat1 <- t(G1) %*% G1 + diag(1e-8, kv); Dmat2 <- t(G2) %*% G2 + diag(1e-8, kv)
-    y1 <- 1:kv; y2 <- 1:kv
-    for(iter in 1:50) {
-      obj <- (G1 %*% y1 + G2 %*% y2); obj <- scale(obj) * sqrt(nv)
-      y1_new <- solve.QP(Dmat1, as.vector(t(G1) %*% obj), t(-A), rep(1e-4, kv-1))$solution
-      y2_new <- solve.QP(Dmat2, as.vector(t(G2) %*% obj), t(-A), rep(1e-4, kv-1))$solution
+    G1 <- model.matrix(~ X - 1, data = raw_data); G2 <- model.matrix(~ Y - 1, data = raw_data)
+    A <- matrix(0, K - 1, K); for (i in 1:(K - 1)) { A[i, i] <- 1; A[i, i+1] <- -1 }
+    Dmat1 <- t(G1) %*% G1 + diag(1e-8, K); Dmat2 <- t(G2) %*% G2 + diag(1e-8, K)
+    y1 <- 1:K; y2 <- 1:K
+    for (iter in 1:50) {
+      obj <- scale(G1 %*% y1 + G2 %*% y2) * sqrt(n)
+      y1_new <- solve.QP(Dmat1, as.vector(t(G1) %*% obj), t(-A), rep(1e-4, K - 1))$solution
+      y2_new <- solve.QP(Dmat2, as.vector(t(G2) %*% obj), t(-A), rep(1e-4, K - 1))$solution
       if (max(abs(y1 - y1_new)) < 1e-5) break
       y1 <- y1_new; y2 <- y2_new
     }
-    results_df$tau_HOMALS[idx] <- cor(mu, (G1 %*% y1 + G2 %*% y2), method = "kendall")
+    scores_homals <- as.vector(G1 %*% y1 + G2 %*% y2)
+    tau_homals <- cor(mu, scores_homals, method = "kendall", use = "complete.obs")
   }, silent = TRUE)
   
   # [2] GRM
   try({
-    g_mod <- grm(data.frame(lapply(raw_data[,2:3], as.numeric)), constrained = FALSE)
-    f_res <- factor.scores(g_mod, resp.patterns = expand.grid(X=1:kv, Y=1:kv))
-    scores_grm <- matrix(NA, kv, kv)
-    for(r in 1:nrow(f_res$score.dat)) scores_grm[f_res$score.dat$X[r], f_res$score.dat$Y[r]] <- f_res$score.dat$z1[r]
-    results_df$tau_GRM[idx] <- cor(mu, scores_grm[cbind(as.numeric(raw_data$X), as.numeric(raw_data$Y))], method = "kendall")
+    suppressWarnings({
+      g_mod <- grm(data.frame(lapply(raw_data, as.numeric)), constrained = FALSE)
+      f_res <- factor.scores(g_mod, resp.patterns = expand.grid(X = 1:K, Y = 1:K))
+      scores_mat <- matrix(NA, K, K)
+      for (r in 1:nrow(f_res$score.dat)) { scores_mat[f_res$score.dat$X[r], f_res$score.dat$Y[r]] <- f_res$score.dat$z1[r] }
+      scores_grm <- scores_mat[cbind(as.numeric(raw_data$X), as.numeric(raw_data$Y))]
+      tau_grm <- cor(mu, scores_grm, method = "kendall", use = "complete.obs")
+    })
   }, silent = TRUE)
   
-  # [3] VAMOS (Our Method)
+  # [3] VAMOS
   try({
-    num_c <- 2 * kv * (kv - 1)
-    A_vamos <- matrix(0, num_c, kv^2)
-    r_idx <- 1
-    for(i in 1:kv) for(j in 1:(kv-1)) { A_vamos[r_idx, (i-1)*kv + j] <- 1; A_vamos[r_idx, (i-1)*kv + j+1] <- -1; r_idx <- r_idx + 1 }
-    for(i in 1:(kv-1)) for(j in 1:kv) { A_vamos[r_idx, (i-1)*kv + j] <- 1; A_vamos[r_idx, i*kv + j] <- -1; r_idx <- r_idx + 1 }
-    
-    fn <- function(s) { ms <- sum(final_counts * s)/nv; -(sum(final_counts * s^2)/nv - ms^2) }
-    gr <- function(s) { ms <- sum(final_counts * s)/nv; -((2/nv)*final_counts*s - 2*ms*(final_counts/nv)) }
-    
-    res_v <- nloptr(x0 = seq(0, 1, length.out = kv^2), eval_f = fn, eval_grad_f = gr,
-                    eval_g_ineq = function(s) as.vector(A_vamos %*% s + 1e-4),
-                    eval_jac_g_ineq = function(s) A_vamos,
-                    lb = rep(0, kv^2), ub = rep(1, kv^2),
-                    opts = list("algorithm" = "NLOPT_LD_SLSQP", "xtol_rel" = 1e-4, "maxeval" = 500))
-    
-    s_mat <- matrix(res_v$solution, kv, kv, byrow = TRUE)
-    results_df$tau_VAMOS[idx] <- cor(mu, s_mat[cbind(as.numeric(raw_data$X), as.numeric(raw_data$Y))], method = "kendall")
+    num_c <- 2 * K * (K - 1); A_vamos <- matrix(0, num_c, K^2); r_idx <- 1
+    for (i in 1:K) for (j in 1:(K - 1)) { A_vamos[r_idx, (i - 1) * K + j] <- 1; A_vamos[r_idx, (i - 1) * K + j+1] <- -1; r_idx <- r_idx + 1 }
+    for (i in 1:(K - 1)) for (j in 1:K) { A_vamos[r_idx, (i - 1) * K + j] <- 1; A_vamos[r_idx, i * K + j] <- -1; r_idx <- r_idx + 1 }
+    fn <- function(s) { ms <- sum(final_counts * s) / n; -(sum(final_counts * s^2) / n - ms^2) }
+    gr <- function(s) { ms <- sum(final_counts * s) / n; -((2 / n) * final_counts * s - 2 * ms * (final_counts / n)) }
+    res_v <- nloptr(x0 = seq(0, 1, length.out = K^2), eval_f = fn, eval_grad_f = gr,
+                    eval_g_ineq = function(s) as.vector(A_vamos %*% s + 1e-4), eval_jac_g_ineq = function(s) A_vamos,
+                    lb = rep(0, K^2), ub = rep(1, K^2), opts = list(algorithm = "NLOPT_LD_SLSQP", xtol_rel = 1e-4, maxeval = 500))
+    s_vamos_mat <- matrix(res_v$solution, K, K, byrow = TRUE)
+    scores_vamos <- s_vamos_mat[cbind(as.numeric(raw_data$X), as.numeric(raw_data$Y))]
+    tau_vamos <- cor(mu, scores_vamos, method = "kendall", use = "complete.obs")
   }, silent = TRUE)
+  
+  return(list(taus = c(HOMALS = tau_homals, GRM = tau_grm, VAMOS = tau_vamos),
+              scores = list(HOMALS = scores_homals, GRM = scores_grm, VAMOS = scores_vamos)))
 }
 
-# ==============================================================================
-# 4. 각 Gamma, Rho 조합별 C에 따른 성능 변화 시각화
-# ==============================================================================
-library(dplyr)
-library(tidyr)
-library(ggplot2)
 
-# Method별 Tau 값 Long 포맷 변환
-results_long <- results_df %>%
-  pivot_longer(cols = starts_with("tau_"), 
-               names_to = "Method", 
-               names_prefix = "tau_", 
-               values_to = "Tau")
+# ==============================================================================
+# 3. 대규모 시뮬레이션 세팅 & 실행
+# ==============================================================================
+grid_params <- expand.grid(
+  n        = c(300, 1000, 3000),
+  rho      = c(-0.7, -0.3, 0, 0.3, 0.7),
+  K        = c(3, 5, 7, 10, 12),
+  gamma    = 3, 
+  het_type = c("exp_mu", "gamma_scale") 
+)
 
-# facet_grid를 활용하여 세로축은 gamma, 가로축은 rho로 격자 생성
-plot_all_cases <- ggplot(results_long, aes(x = C, y = Tau, color = Method, group = Method)) +
-  geom_line(size = 0.7) + # 최신 ggplot2 버전에 맞춰 size 사용
-  geom_point(size = 3) +
-  facet_grid(gamma ~ rho, labeller = label_both) + 
+n_sim <- 50
+total_cond <- nrow(grid_params)
+
+results_list <- list()
+top20_results_list <- list()
+
+cat(sprintf("🔥 대규모 시뮬레이션 시작 (총 %d개 조건, 조건당 %d회 반복)\n", total_cond, n_sim))
+set.seed(2026)
+
+for (idx in 1:total_cond) {
+  p_n <- grid_params$n[idx]; p_rho <- grid_params$rho[idx]
+  p_K <- grid_params$K[idx]; p_gamma <- grid_params$gamma[idx]
+  p_het <- grid_params$het_type[idx]
+  
+  cat(sprintf("\n[조건 %d/%d] n=%d, rho=%.1f, K=%d, Type=%s...", idx, total_cond, p_n, p_rho, p_K, p_het))
+  
+  is_top20_cond <- (p_n == 1000 && p_K == 7 && p_rho == 0 && p_het == "exp_mu")
+  if(is_top20_cond) fixed_mu_top20 <- rnorm(p_n, 0, 1)
+  
+  for (sim in 1:n_sim) {
+    d_out <- generate_data(p_n, p_rho, p_K, p_gamma, p_het, if(is_top20_cond) fixed_mu_top20 else NULL)
+    m_out <- fit_models(d_out$raw_data, d_out$final_counts, p_n, p_K, d_out$mu)
+    
+    results_list[[length(results_list) + 1]] <- data.frame(
+      n = p_n, rho = p_rho, K = p_K, gamma = p_gamma, HetType = p_het, Sim = sim, 
+      EmptyCells = d_out$empty_cells, 
+      HOMALS = m_out$taus["HOMALS"], GRM = m_out$taus["GRM"], VAMOS = m_out$taus["VAMOS"]
+    )
+    
+    if (is_top20_cond) {
+      idx_homals <- order(m_out$scores$HOMALS, decreasing = TRUE, na.last = TRUE)[1:20]
+      idx_grm    <- order(m_out$scores$GRM,    decreasing = TRUE, na.last = TRUE)[1:20]
+      idx_vamos  <- order(m_out$scores$VAMOS,  decreasing = TRUE, na.last = TRUE)[1:20]
+      
+      top20_results_list[[sim]] <- data.frame(
+        Sim = sim, Estimated_Rank = 1:20,
+        HOMALS = d_out$mu[idx_homals], GRM = d_out$mu[idx_grm], VAMOS = d_out$mu[idx_vamos]
+      )
+    }
+  }
+}
+
+all_results <- bind_rows(results_list)
+top20_df <- bind_rows(top20_results_list)
+
+
+# ==============================================================================
+# 4. 시각화 (Visualization)
+# ==============================================================================
+
+# 시각화 데이터 준비
+plot_data_main <- all_results %>%
+  filter(K != 12) %>% 
+  pivot_longer(cols = c("HOMALS", "GRM", "VAMOS"), names_to = "Method", values_to = "Tau") %>%
+  mutate(Method = factor(Method, levels = c("HOMALS", "GRM", "VAMOS")), K_factor = factor(K)) %>%
+  filter(!is.na(Tau))
+
+# [시각화 1] Comparative Performance Trajectories (HetType 분리 적용)
+p_trend <- ggplot(plot_data_main, aes(x = K_factor, y = Tau, color = Method)) +
+  geom_line(aes(group = interaction(Method, Sim)), position = position_dodge(width = 0.4), alpha = 0.1, linewidth = 0.3) +
+  stat_summary(aes(group = Method), fun.data = mean_sdl, fun.args = list(mult = 1), geom = "errorbar", width = 0.2, position = position_dodge(width = 0.4), linewidth = 0.7) +
+  stat_summary(aes(group = Method), fun = mean, geom = "line", position = position_dodge(width = 0.4), linewidth = 1.2) +
+  stat_summary(aes(group = Method), fun = mean, geom = "point", position = position_dodge(width = 0.4), size = 2, shape = 21, fill = "white", stroke = 1.2) +
+  facet_grid(n ~ rho + HetType, labeller = label_both) + # Grid에 신규 조건 반영
   scale_color_brewer(palette = "Set1") +
-  theme_bw(base_size = 14) +
-  labs(
-    title = "Performance Trend: Kendall's Tau vs Category Density (C)",
-    subtitle = "Faceted by Variance Ratio (gamma) and Correlation (rho)",
-    x = "Category Density Ratio (C = K/n)",
-    y = "Kendall's Tau-b"
-  ) +
-  theme(
-    legend.position = "bottom",
-    panel.grid.minor = element_blank(),
-    strip.background = element_rect(fill = "grey90", color = "black"),
-    strip.text = element_text(face = "bold", size = 10)
-  )
+  theme_bw(base_size = 12) +
+  labs(title = "Comparative Performance Trajectories", x = "K", y = "Kendall's Tau", color = "Method") +
+  theme(legend.position = "bottom", strip.background = element_rect(fill = "grey95"))
 
-# 그래프 출력
-print(plot_all_cases)
+print(p_trend)
+
+# [시각화 2] Sparsity Analysis
+empty_cells_summary <- all_results %>%
+  group_by(n, K, rho, HetType) %>%
+  summarize(Avg_Empty = mean(EmptyCells), Total_Cells = first(K)^2, .groups = "drop") %>%
+  mutate(n_label = factor(paste0("Sample Size (n) = ", n)), rho_factor = factor(rho))
+
+p_empty <- ggplot(empty_cells_summary, aes(x = K, y = Avg_Empty)) +
+  geom_line(aes(y = Total_Cells), color = "grey60", linetype = "dashed", linewidth = 0.8) +
+  geom_line(aes(color = rho_factor), linewidth = 1) +
+  geom_point(aes(color = rho_factor), size = 3) +
+  facet_grid(HetType ~ n_label) + # HetType 별로 행 분할
+  scale_x_continuous(breaks = unique(empty_cells_summary$K)) +
+  scale_color_viridis_d(option = "plasma") +
+  theme_bw(base_size = 14) +
+  labs(title = "Average Number of Empty Cells by K, n, and rho", x = "K", y = "Average Empty Cells", color = "rho") +
+  theme(legend.position = "bottom", strip.background = element_rect(fill = "grey90"))
+
+print(p_empty)
+
+# [시각화 3] Top-20 Elite Recovery
+if(nrow(top20_df) > 0) {
+  plot_data_top20 <- top20_df %>% pivot_longer(cols = c("HOMALS", "GRM", "VAMOS"), names_to = "Method", values_to = "Recovered_mu") %>% mutate(Method = factor(Method, levels = c("HOMALS", "GRM", "VAMOS")))
+  ideal_df <- data.frame(Estimated_Rank = 1:20, Ideal_mu = sort(fixed_mu_top20, decreasing = TRUE)[1:20])
+  
+  p_top20 <- ggplot(plot_data_top20, aes(x = Estimated_Rank, y = Recovered_mu, color = Method)) +
+    geom_point(data = ideal_df, aes(x = Estimated_Rank, y = Ideal_mu), inherit.aes = FALSE, color = "black", shape = 4, size = 4.5, stroke = 1.5) +
+    stat_summary(aes(group = Method), fun.data = mean_sdl, fun.args = list(mult = 1), geom = "errorbar", width = 0.5, position = position_dodge(width = 0.6), linewidth = 0.8) +
+    stat_summary(aes(group = Method), fun = mean, geom = "line", position = position_dodge(width = 0.6), linewidth = 1.2) +
+    stat_summary(aes(group = Method), fun = mean, geom = "point", position = position_dodge(width = 0.6), size = 3, shape = 21, fill = "white", stroke = 1.5) +
+    scale_x_continuous(breaks = 1:20) + scale_color_brewer(palette = "Set1") +
+    theme_bw(base_size = 14) +
+    labs(title = "Top-20 Elite Recovery", x = "Estimated Rank", y = "True mu Value") +
+    theme(legend.position = "bottom")
+  
+  print(p_top20)
+}
+
+
+
+cat("\n\n🔥 단일 조건 산점도 추출 시작 (n=1000, K=7, rho=0, exp_mu)\n")
+set.seed(2026)
+
+# 앞서 만든 함수를 재활용하여 단일 데이터셋 추출
+sc_data <- generate_data(n = 1000, rho = 0, K = 7, gamma = 3, het_type = "exp_mu")
+sc_mod  <- fit_models(sc_data$raw_data, sc_data$final_counts, n = 1000, K = 7, sc_data$mu)
+
+# 데이터 스케일링 취합
+plot_df <- data.frame(
+  True_mu = as.numeric(scale(sc_data$mu)),
+  HOMALS  = as.numeric(scale(sc_mod$scores$HOMALS)),
+  GRM     = as.numeric(scale(sc_mod$scores$GRM)),
+  VAMOS   = as.numeric(scale(sc_mod$scores$VAMOS))
+)
+
+# 콘솔 결과 출력
+cat(sprintf("\n=== [Kendall's Tau 결과] ===\n"))
+cat(sprintf("HOMALS : %.3f\n", sc_mod$taus["HOMALS"]))
+cat(sprintf("GRM    : %.3f\n", sc_mod$taus["GRM"]))
+cat(sprintf("VAMOS  : %.3f\n", sc_mod$taus["VAMOS"]))
+cat(sprintf("================================\n\n"))
+
+# 공통 테마 정의
+minimal_theme <- function() {
+  theme_bw(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(color = "black", size = 12),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# [시각화 4-1] HOMALS
+p_homals <- ggplot(plot_df, aes(x = True_mu, y = HOMALS)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  labs(title = "HOMALS: Estimated Score vs True mu",
+       subtitle = sprintf("Kendall's Tau = %.3f", sc_mod$taus["HOMALS"]),
+       x = expression("True " ~ mu ~ " (Standardized)"),
+       y = expression("Estimated Score " ~ hat(R)[i] ~ " (Standardized)")) +
+  coord_cartesian(ylim = c(-3, 3), xlim = c(-3, 3)) +
+  minimal_theme()
+
+# [시각화 4-2] GRM
+p_grm <- ggplot(plot_df, aes(x = True_mu, y = GRM)) +
+  geom_point(alpha = 0.4, color = "darkorange") +
+  labs(title = "GRM: Estimated Score vs True mu",
+       subtitle = sprintf("Kendall's Tau = %.3f", sc_mod$taus["GRM"]),
+       x = expression("True " ~ mu ~ " (Standardized)"),
+       y = expression("Estimated Score " ~ hat(R)[i] ~ " (Standardized)")) +
+  coord_cartesian(ylim = c(-3, 3), xlim = c(-3, 3)) +
+  minimal_theme()
+
+# [시각화 4-3] VAMOS
+p_vamos <- ggplot(plot_df, aes(x = True_mu, y = VAMOS)) +
+  geom_point(alpha = 0.4, color = "forestgreen") +
+  labs(title = "VAMOS: Estimated Score vs True mu",
+       subtitle = sprintf("Kendall's Tau = %.3f", sc_mod$taus["VAMOS"]),
+       x = expression("True " ~ mu ~ " (Standardized)"),
+       y = expression("Estimated Score " ~ hat(R)[i] ~ " (Standardized)")) +
+  coord_cartesian(ylim = c(-3, 3), xlim = c(-3, 3)) +
+  minimal_theme()
+
+# 플롯 출력
+print(p_homals)
+print(p_grm)
+print(p_vamos)

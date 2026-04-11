@@ -1,0 +1,179 @@
+# 필요한 패키지 로드
+if(!require(survival)) install.packages("survival")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(tidyr)) install.packages("tidyr")
+
+library(survival)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# 1. 구간 중단(Interval-censored) + 좌/우측 중단 데이터 생성 함수
+generate_ic_data <- function(n, gamma_r, gamma_l) {
+  T_true <- rexp(n, rate = 1)
+  
+  n_rc <- round(n * gamma_r)  
+  n_lc <- round(n * gamma_l)  
+  n_ic <- n - n_rc - n_lc     
+  
+  indices <- sample(1:n)
+  rc_idx <- indices[1:n_rc]
+  lc_idx <- indices[(n_rc + 1):(n_rc + n_lc)]
+  ic_idx <- indices[(n_rc + n_lc + 1):n]
+  
+  L <- numeric(n)
+  R <- numeric(n)
+  
+  if (n_rc > 0) {
+    L[rc_idx] <- runif(n_rc, min = 0, max = T_true[rc_idx])
+    R[rc_idx] <- Inf
+  }
+  if (n_lc > 0) {
+    L[lc_idx] <- 0
+    R[lc_idx] <- T_true[lc_idx] + runif(n_lc, min = 0.1, max = 1.0)
+  }
+  if (n_ic > 0) {
+    L[ic_idx] <- runif(n_ic, min = pmax(0, T_true[ic_idx] - 1), max = T_true[ic_idx])
+    R[ic_idx] <- T_true[ic_idx] + runif(n_ic, min = 0.1, max = 1.0)
+  }
+  
+  data.frame(L = L, R = R, T_true = T_true)
+}
+
+# 2. survfit 객체로부터 특정 grid 위에서의 CDF 추출 헬퍼 함수
+get_cdf <- function(fit, grid) {
+  if (is.null(fit$surv)) {
+    return(rep(0, length(grid)))
+  }
+  cdf_step <- stepfun(fit$time, c(0, 1 - fit$surv))
+  cdf_step(grid)
+}
+
+# 3. 메인 시뮬레이션 설정
+n_seq <- c(100,200,400,800)       
+alpha_seq <- c(0.1, 0.3,0.5) 
+gamma_seq <- c(0.1, 0.3)     
+gamma_l_fixed <- 0.1        
+n_sim <- 50                  
+
+results_list <- list()
+counter <- 1
+
+eval_grid <- seq(0.01, qexp(0.95, 1), length.out = 500)
+F_true_grid <- pexp(eval_grid, rate = 1)
+
+set.seed(2026) 
+
+# 시뮬레이션 루프
+for (n in n_seq) {
+  for (alpha in alpha_seq) {
+    for (gamma_r in gamma_seq) {
+      for (sim in 1:n_sim) {
+        
+        n1 <- round(n * alpha)
+        n2 <- n - n1
+        
+        # 데이터 생성
+        df1 <- generate_ic_data(n1, gamma_r, gamma_l_fixed)
+        df2 <- generate_ic_data(n2, gamma_r, gamma_l_fixed)
+        df_pooled <- rbind(df1, df2)
+        
+        make_surv <- function(df) {
+          status <- ifelse(is.infinite(df$R), 0, 
+                           ifelse(df$L == 0, 2, 3))
+          time1 <- ifelse(status == 2, df$R, df$L)
+          time2 <- ifelse(status == 3, df$R, NA)
+          Surv(time = time1, time2 = time2, event = status, type = "interval")
+        }
+        
+        # 각각의 NPMLE 적합
+        fit1 <- survfit(make_surv(df1) ~ 1)
+        fit2 <- survfit(make_surv(df2) ~ 1)
+        fit_pooled <- survfit(make_surv(df_pooled) ~ 1)
+        
+        # Grid 위에서 CDF 평가
+        F1_hat <- get_cdf(fit1, eval_grid)
+        F2_hat <- get_cdf(fit2, eval_grid)
+        F_pooled_hat <- get_cdf(fit_pooled, eval_grid)
+        
+        # Adaptive Estimator 조립
+        F_adap_hat <- alpha * F1_hat + (1 - alpha) * F2_hat
+        
+        # 1. Pooled Error
+        l2_pool <- sqrt(mean((F_pooled_hat - F_true_grid)^2))
+        sup_pool <- max(abs(F_pooled_hat - F_true_grid))
+        
+        # 2. Adaptive Error
+        l2_adap <- sqrt(mean((F_adap_hat - F_true_grid)^2))
+        sup_adap <- max(abs(F_adap_hat - F_true_grid))
+        
+        # 결과 저장 (2개의 Estimator로 축소)
+        est_names <- c("Pooled NPMLE (n)", "Adaptive NPMLE (n)")
+        
+        results_list[[counter]] <- data.frame(
+          n = n,
+          alpha = alpha,
+          gamma_r = gamma_r,
+          gamma_l = gamma_l_fixed,
+          sim_id = sim,
+          Estimator = rep(est_names, each = 2),
+          Error_Type = rep(c("L2 Error", "Sup Error"), 2),
+          Error_Value = c(l2_pool, sup_pool, l2_adap, sup_adap)
+        )
+        counter <- counter + 1
+      }
+    }
+  }
+}
+
+final_results <- bind_rows(results_list)
+
+# 4. 시뮬레이션 결과 요약
+summary_results <- final_results %>%
+  group_by(n, alpha, gamma_r, gamma_l, Estimator, Error_Type) %>%
+  summarise(Mean_Error = mean(Error_Value), .groups = 'drop') %>%
+  mutate(log_n = log(n), log_error = log(Mean_Error))
+
+# 5. 수정된 그래프 시각화 (2개 선 비교 + O(n^-1/3) 기준선 추가)
+
+# 기준선(Reference line)의 y절편을 맞추기 위한 계산
+# 가장 작은 n에서의 평균 에러를 기준으로 삼아 선이 자연스럽게 겹치도록 합니다.
+base_log_n <- min(summary_results$log_n)
+base_log_error <- mean(summary_results$log_error[summary_results$log_n == base_log_n])
+ref_intercept <- base_log_error - (-1/3) * base_log_n
+
+p <- ggplot(summary_results, 
+            aes(x = log_n, y = log_error, 
+                color = Estimator,     
+                linetype = Estimator, 
+                shape = Estimator,
+                group = Estimator)) +   
+  geom_point(size = 3, alpha = 0.8) +
+  geom_line(linewidth = 1) +            
+  # 기울기가 -1/3인 Reference Line 추가
+  geom_abline(intercept = ref_intercept, slope = -1/3, 
+              color = "black", linetype = "dotted", linewidth = 1.2) +
+  facet_grid(Error_Type + paste("gamma_R =", gamma_r) ~ paste("alpha =", alpha), scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Convergence Rates: Pooled vs Adaptive Estimators",
+    subtitle = "Dotted black line indicates the theoretical O(n^-1/3) convergence rate",
+    x = "log(n)",
+    y = "log(Error)",
+    color = "Estimator Type",
+    linetype = "Estimator Type",
+    shape = "Estimator Type"
+  ) +
+  theme(strip.background = element_rect(fill = "grey90"),
+        strip.text = element_text(face = "bold"),
+        legend.position = "bottom",     
+        legend.title = element_text(face = "bold")) +
+  scale_color_manual(values = c("Pooled NPMLE (n)" = "#E41A1C", 
+                                "Adaptive NPMLE (n)" = "#377EB8"))
+
+print(p)
+
+
+
+

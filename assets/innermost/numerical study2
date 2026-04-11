@@ -1,0 +1,182 @@
+# 필요한 패키지 로드
+if(!require(survival)) install.packages("survival")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(tidyr)) install.packages("tidyr")
+
+library(survival)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# --- (1) 데이터 생성 및 Innermost 추출 함수 ---
+generate_ic_data <- function(n, gamma_r, gamma_l) {
+  T_true <- rexp(n, rate = 1)
+  n_rc <- round(n * gamma_r); n_lc <- round(n * gamma_l); n_ic <- n - n_rc - n_lc     
+  indices <- sample(1:n)
+  rc_idx <- indices[1:n_rc]; lc_idx <- indices[(n_rc + 1):(n_rc + n_lc)]; ic_idx <- indices[(n_rc + n_lc + 1):n]
+  
+  L <- numeric(n); R <- numeric(n)
+  if (n_rc > 0) { L[rc_idx] <- runif(n_rc, min = 0, max = T_true[rc_idx]); R[rc_idx] <- Inf }
+  if (n_lc > 0) { L[lc_idx] <- 0; R[lc_idx] <- T_true[lc_idx] + runif(n_lc, min = 0.1, max = 1.0) }
+  if (n_ic > 0) { L[ic_idx] <- runif(n_ic, min = pmax(0, T_true[ic_idx] - 1), max = T_true[ic_idx]); R[ic_idx] <- T_true[ic_idx] + runif(n_ic, min = 0.1, max = 1.0) }
+  
+  data.frame(L = L, R = R, T_true = T_true)
+}
+
+find_innermost <- function(L, R) {
+  R_finite <- ifelse(is.infinite(R), max(L[is.finite(L)]) + 10, R)
+  L_set <- unique(L); R_set <- unique(R_finite)
+  
+  innermost <- data.frame(left = numeric(0), right = numeric(0))
+  for (l in L_set) {
+    valid_R <- R_set[R_set >= l]
+    if (length(valid_R) == 0) next
+    r <- min(valid_R)
+    if (any(L_set > l & L_set < r)) next
+    if (any(R_set > l & R_set < r)) next
+    innermost <- rbind(innermost, data.frame(left = l, right = r))
+  }
+  return(unique(innermost)) 
+}
+
+# --- (2) 헬퍼 함수: survfit 객체에서 각 Innermost Interval의 Mass 추출 ---
+get_cdf_val <- function(fit, grid) {
+  if (is.null(fit$surv)) return(rep(0, length(grid)))
+  cdf_step <- stepfun(fit$time, c(0, 1 - fit$surv))
+  cdf_step(grid)
+}
+
+get_masses <- function(fit, inner_df) {
+  masses <- numeric(nrow(inner_df))
+  for(i in 1:nrow(inner_df)) {
+    r_val <- ifelse(is.infinite(inner_df$right[i]), max(fit$time) + 1, inner_df$right[i])
+    l_val <- inner_df$left[i]
+    # CDF의 점프 크기가 해당 구간의 질량(Mass)
+    masses[i] <- max(0, get_cdf_val(fit, r_val) - get_cdf_val(fit, l_val))
+  }
+  return(masses)
+}
+
+# --- (3) 메인 시뮬레이션 및 시각화 ---
+n_visual_seq <- c(50, 100, 200, 400, 800)
+alpha <- 0.5
+tol <- 1e-8 # 부동소수점 오차 방지
+
+max_plot_x <- qexp(0.95, rate = 1)
+eval_grid <- seq(0, max_plot_x, length.out = 1000)
+true_cdf_df <- data.frame(x = eval_grid, F_true = pexp(eval_grid, rate = 1))
+
+set.seed(2026)
+
+for (n_val in n_visual_seq) {
+  
+  df_full <- generate_ic_data(n_val, gamma_r = 0.1, gamma_l = 0.1)
+  
+  # 데이터 n/2 로 분할
+  n1 <- round(n_val * alpha)
+  df1 <- df_full[1:n1, ]
+  df2 <- df_full[(n1 + 1):n_val, ]
+  
+  make_surv <- function(data) {
+    status <- ifelse(is.infinite(data$R), 0, ifelse(data$L == 0, 2, 3))
+    time1 <- ifelse(status == 2, data$R, data$L)
+    time2 <- ifelse(status == 3, data$R, NA)
+    Surv(time = time1, time2 = time2, event = status, type = "interval")
+  }
+  
+  fit_pooled <- survfit(make_surv(df_full) ~ 1)
+  fit1 <- survfit(make_surv(df1) ~ 1)
+  fit2 <- survfit(make_surv(df2) ~ 1)
+  
+  # 1. Innermost Intervals 탐색
+  inner_pool <- find_innermost(df_full$L, df_full$R)
+  inner1 <- find_innermost(df1$L, df1$R)
+  inner2 <- find_innermost(df2$L, df2$R)
+  
+  # 2. 서브 샘플의 구간별 Mass 추출
+  inner1$mass <- get_masses(fit1, inner1)
+  inner2$mass <- get_masses(fit2, inner2)
+  
+  # 3. Mass Mapping (Adaptive Estimator 알고리즘)
+  inner_pool$q1 <- 0
+  inner_pool$q2 <- 0
+  
+  # Group 1의 질량을 Pooled interval에 배정
+  for(j in 1:nrow(inner1)) {
+    idx <- which(inner_pool$left >= inner1$left[j] - tol & inner_pool$right <= inner1$right[j] + tol)
+    if(length(idx) > 0) {
+      inner_pool$q1[idx] <- inner1$mass[j] / length(idx) # 질량 분배
+    }
+  }
+  
+  # Group 2의 질량을 Pooled interval에 배정
+  for(j in 1:nrow(inner2)) {
+    idx <- which(inner_pool$left >= inner2$left[j] - tol & inner_pool$right <= inner2$right[j] + tol)
+    if(length(idx) > 0) {
+      inner_pool$q2[idx] <- inner2$mass[j] / length(idx)
+    }
+  }
+  
+  # 최종 p_k 계산
+  inner_pool$p_adap <- alpha * inner_pool$q1 + (1 - alpha) * inner_pool$q2
+  
+  # 4. 평가를 위한 CDF 재조립 (Step Function)
+  F_hat_adaptive <- sapply(eval_grid, function(x) {
+    sum(inner_pool$p_adap[inner_pool$right <= x])
+  })
+  
+  F_hat_pooled <- get_cdf_val(fit_pooled, eval_grid)
+  
+  # 5. 시각화 데이터 준비
+  plot_data <- data.frame(
+    x = eval_grid,
+    Pooled = F_hat_pooled,
+    Adaptive = F_hat_adaptive
+  ) %>% pivot_longer(cols = c("Pooled", "Adaptive"), names_to = "Estimator", values_to = "F_val")
+  
+  # 6. 개별 그래프 렌더링
+  p <- ggplot() +
+    # Pooled Innermost Intervals (x축 y=0)
+    geom_segment(data = inner_pool, aes(x = left, xend = right, y = 0, yend = 0), 
+                 color = "#4DAF4A", size = 2.5, alpha = 0.8) +
+    
+    # 추정량 선 (Pooled & Adaptive)
+    geom_step(data = plot_data, aes(x = x, y = F_val, color = Estimator), 
+              size = 1, alpha = 0.8) +
+    
+    # True CDF (빨간색 실선 - aes 안에 넣어 범례에 통합)
+    geom_line(data = true_cdf_df, aes(x = x, y = F_true, color = "True F0"), 
+              linetype = "solid", size = 1.2) +
+    
+    # 범례 색상 명확하게 지정 (파란색, 주황색, 빨간색)
+    scale_color_manual(
+      name = "Legend",
+      values = c(
+        "True F0" = "red",
+        "Pooled" = "blue", 
+        "Adaptive" = "darkorange"
+      )
+    ) +
+    
+    theme_bw() +
+    coord_cartesian(ylim = c(-0.02, 1), xlim = c(0, max_plot_x)) +
+    labs(
+      title = bquote("Convergence of Estimators (n =" ~ .(n_val) ~ ")"),
+      subtitle = "Green segments on x-axis: Pooled Innermost Intervals",
+      x = "Support (t)",
+      y = "Cumulative Probability F(t)"
+    ) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      # 범례 디자인 및 위치 조정
+      legend.position = c(0.85, 0.2), 
+      legend.background = element_rect(fill = "white", color = "black", size = 0.5),
+      legend.title = element_text(face = "bold", size = 12),
+      legend.text = element_text(size = 11)
+    ) +
+    # 범례 박스 안의 선 굵기를 키워 가독성 극대화
+    guides(color = guide_legend(override.aes = list(size = 2)))
+  
+  print(p)
+}

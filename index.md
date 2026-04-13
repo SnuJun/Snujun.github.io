@@ -1,26 +1,33 @@
 # Welcome
 
 Hello, I’m **Junwoo Lee**.  
-I am currently pursuing a Master’s degree in Statistics at Seoul National University,  
-where I study **high-dimensional statistics** and related topics in modern inference.
+I recently received my M.S. in Statistics from Seoul National University and will begin my Ph.D. in Statistics at Virginia Tech in September 2026.  
+I am currently working as a research assistant in the Multivariate Statistics Lab.
 
 ---
+
 ### Education
 
-- **Seoul National University**, College of Natural Sciences
-- — *M.S. in Statistics*  
-  *Mar 2024 – Present*  
-  Focus: High-dimensional statistical inference and covariance estimation
+- **Virginia Tech**  
+  *Ph.D. in Statistics (Incoming)*  
+  *Sep 2026 – Present*
 
-- **Konkuk University**, College of Social Sciences
--  — *B.A. in Applied Statistics*  
-  *Mar 2017 – Feb 2024*  
+- **Seoul National University**, College of Natural Sciences  
+  *M.S. in Statistics*  
+  *Mar 2024 – Feb 2026*  
+  Advisor: Johan Lim  
+  Focus: High-dimensional statistical inference and covariance estimation  
 
+- **Konkuk University**, College of Social Sciences  
+  *B.A. in Applied Statistics*  
+  *Mar 2017 – Feb 2024*
 
-- **Republic of Korea Army** — *Military Service*  
-  *Mar 2019 – Mar 2021*  
+- **Republic of Korea Army**  
+  *Military Service*  
+  *Mar 2019 – Mar 2021*
 
 ---
+
 ### Projects & Activities
 
 #### Undergraduate

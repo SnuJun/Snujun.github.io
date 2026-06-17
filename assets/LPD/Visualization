@@ -1,0 +1,275 @@
+## ============================================================
+## Visualization:
+## 1. Sample covariance
+## 2. Adaptive Hard -> LPD_F
+## 3. Adaptive Hard -> ICF(COMET)
+## 4. Xue(Soft)
+## 5. Rothman(Soft)
+## ============================================================
+
+rm(list = ls())
+
+wd <- "C:/Users/user/Desktop/LPD section 4.5"
+setwd(wd)
+
+library(MASS)
+library(fields)
+library(PDSCE)
+library(RSpectra)
+
+source(file.path(wd, "data generate.R"))
+source(file.path(wd, "Estimators.R"))
+source(file.path(wd, "getLPD.R"))
+source(file.path(wd, "ICF Algorithm.R"))
+source(file.path(wd, "Xue method.R"))
+source(file.path(wd, "Rothman method.R"))
+
+set.seed(1234)
+
+## ------------------------------------------------------------
+## settings
+## ------------------------------------------------------------
+n <- 100
+p <- 120
+iter <- 1
+model_name <- "m1"   # "m1", "m2", "m3", "m4"
+
+eps <- 1e-3
+thresseq <- seq(0, 1, length.out = 30)
+
+## ------------------------------------------------------------
+## true covariance and data generation
+## ------------------------------------------------------------
+cov_fun <- get(paste0("cov.mtx.", model_name))
+Sigma <- cov_fun(p)
+
+eig <- eigen(Sigma, symmetric = TRUE)
+sqrt_Sigma <- eig$vectors %*% diag(sqrt(pmax(eig$values, 0))) %*% t(eig$vectors)
+
+X <- matrix(rnorm(n * p), nrow = n, ncol = p) %*% sqrt_Sigma
+X <- scale(X, center = TRUE, scale = FALSE)
+
+## ------------------------------------------------------------
+## 1. Sample covariance
+## ------------------------------------------------------------
+cat("Running sample covariance...\n")
+time_S_start <- Sys.time()
+
+S <- cov(X)
+
+time_S <- difftime(Sys.time(), time_S_start, units = "secs")
+
+## ------------------------------------------------------------
+## Adaptive Hard thresholding
+## This is the common initial step for LPD_F and ICF(COMET)
+## ------------------------------------------------------------
+cat("Running adaptive hard thresholding...\n")
+time_adap_hard_start <- Sys.time()
+
+adap_hard_fit <- ftn.cov.adap(
+  datamat = X,
+  thres.ftn = thres.hard,
+  thresseq = NULL,
+  thresnum = 100,
+  diag.thres = FALSE
+)
+
+S_adap_hard <- adap_hard_fit$estimate
+
+time_adap_hard <- difftime(Sys.time(), time_adap_hard_start, units = "secs")
+
+## amat: nonzero support matrix from adaptive hard thresholding
+amat <- 1 * (abs(S_adap_hard) > 1e-8)
+diag(amat) <- 0
+
+## ------------------------------------------------------------
+## 2. Adaptive Hard -> LPD_F
+## ------------------------------------------------------------
+cat("Running Adaptive Hard -> LPD_F...\n")
+time_lpd_start <- Sys.time()
+
+lpd_fit <- getLPD(
+  A = S_adap_hard,
+  lwr_bd = eps,
+  type_norm = "Frobenius"
+)
+
+S_lpd_f <- lpd_fit$LPD
+
+time_lpd <- difftime(Sys.time(), time_lpd_start, units = "secs")
+
+## If you want total time including adaptive hard thresholding:
+time_lpd_total <- time_adap_hard + time_lpd
+
+## ------------------------------------------------------------
+## 3. Adaptive Hard -> ICF(COMET)
+## ------------------------------------------------------------
+cat("Running Adaptive Hard -> ICF(COMET)...\n")
+time_icf_start <- Sys.time()
+
+icf_fit <- ICF(
+  amat = amat,
+  dat = X,
+  cc = eps,
+  tol = 1e-2,
+  MAXiter = 1000
+)
+
+S_icf <- icf_fit$mat
+
+time_icf <- difftime(Sys.time(), time_icf_start, units = "secs")
+
+## If you want total time including adaptive hard thresholding:
+time_icf_total <- time_adap_hard + time_icf
+
+## ------------------------------------------------------------
+## 4. Xue(Soft)
+## ------------------------------------------------------------
+cat("Running Xue(Soft)...\n")
+time_xue_start <- Sys.time()
+
+xue_fit <- ftn.cov.Xue(
+  datamat = X,
+  thres.ftn = thres.soft,
+  thresseq = thresseq,
+  mineigval = eps,
+  tol = 1e-4,
+  MAXITER = 100,
+  message = FALSE
+)
+
+S_xue <- xue_fit$est
+
+time_xue <- difftime(Sys.time(), time_xue_start, units = "secs")
+
+## ------------------------------------------------------------
+## 5. Rothman(Soft)
+## ------------------------------------------------------------
+cat("Running Rothman(Soft)...\n")
+time_roth_start <- Sys.time()
+
+roth_fit <- ftn.cov.Roth(
+  datamat = X,
+  thresseq = thresseq,
+  tol = 1e-7,
+  MAXITER = 10000
+)
+
+S_roth <- roth_fit$est
+
+time_roth <- difftime(Sys.time(), time_roth_start, units = "secs")
+
+## ------------------------------------------------------------
+## eigenvalue and time summary
+## ------------------------------------------------------------
+min_eig <- function(A) {
+  min(eigen(A, symmetric = TRUE, only.values = TRUE)$values)
+}
+
+eig_check <- data.frame(
+  Matrix = c(
+    "True Sigma",
+    "Sample covariance",
+    "Adaptive Hard",
+    "Adaptive Hard -> LPD_F",
+    "Adaptive Hard -> ICF(COMET)",
+    "Xue(Soft)",
+    "Rothman(Soft)"
+  ),
+  Min_eigenvalue = c(
+    min_eig(Sigma),
+    min_eig(S),
+    min_eig(S_adap_hard),
+    min_eig(S_lpd_f),
+    min_eig(S_icf),
+    min_eig(S_xue),
+    min_eig(S_roth)
+  )
+)
+
+print(eig_check)
+
+time_check <- data.frame(
+  Method = c(
+    "Sample covariance",
+    "Adaptive Hard only",
+    "Adaptive Hard -> LPD_F",
+    "Adaptive Hard -> ICF(COMET)",
+    "Xue(Soft)",
+    "Rothman(Soft)"
+  ),
+  Time_sec = round(c(
+    as.numeric(time_S),
+    as.numeric(time_adap_hard),
+    as.numeric(time_lpd_total),
+    as.numeric(time_icf_total),
+    as.numeric(time_xue),
+    as.numeric(time_roth)
+  ), 4)
+)
+
+print(time_check)
+
+cat("\nAdaptive Hard lambda.opt:", adap_hard_fit$lambda.opt, "\n")
+cat("LPD_F mu:", lpd_fit$mu, " / alpha:", lpd_fit$alpha, "\n")
+cat("ICF iter:", icf_fit$iter, " / final matrix diff:", icf_fit$m_df, "\n")
+cat("Xue threshold:", xue_fit$thres, " / iter:", xue_fit$iter, "\n")
+cat("Rothman threshold:", roth_fit$thres, " / iter: NA\n")
+
+## ------------------------------------------------------------
+## Visualization
+## ------------------------------------------------------------
+par(mfrow = c(2, 3))
+
+image(
+  1:p, 1:p,
+  Sigma[p:1, ],
+  main = "True covariance"
+)
+
+image(
+  1:p, 1:p,
+  S_lpd_f[p:1, ],
+  main = "Adaptive Hard -> LPD_F"
+)
+
+image(
+  1:p, 1:p,
+  S_icf[p:1, ],
+  main = "Adaptive Hard -> ICF"
+)
+
+image(
+  1:p, 1:p,
+  S_xue[p:1, ],
+  main = "Xue(Soft)"
+)
+
+image(
+  1:p, 1:p,
+  S_roth[p:1, ],
+  main = "Rothman(Soft)"
+)
+
+plot.new()
+
+text(
+  0.05, 0.95,
+  paste0(
+    "Summary\n\n",
+    "model = ", model_name, "\n",
+    "n = ", n, ", p = ", p, "\n\n",
+    "Min eigenvalue\n",
+    "LPD_F = ", round(min_eig(S_lpd_f), 4), "\n",
+    "ICF = ", round(min_eig(S_icf), 4), "\n",
+    "Xue = ", round(min_eig(S_xue), 4), "\n",
+    "Roth = ", round(min_eig(S_roth), 4), "\n\n",
+    "Time(sec)\n",
+    "LPD_F = ", round(as.numeric(time_lpd_total), 3), "\n",
+    "ICF = ", round(as.numeric(time_icf_total), 3), "\n",
+    "Xue = ", round(as.numeric(time_xue), 3), "\n",
+    "Roth = ", round(as.numeric(time_roth), 3)
+  ),
+  adj = c(0, 1),
+  cex = 0.9
+)

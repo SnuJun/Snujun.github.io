@@ -41,7 +41,7 @@ getLPD <- function(A, lwr_bd, type_norm, mu = NULL){
              res_eig <- eigen(A, only.values = TRUE)
              lam1 <- min(res_eig$values)
              
-             mu <- sum((res_eig$values - lam1)^2) /
+             mu <- lam1 + sum((res_eig$values - lam1)^2) /
                sum((res_eig$values - lam1))
              
              mu <- max(mu, lwr_bd)
